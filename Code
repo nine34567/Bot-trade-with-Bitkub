@@ -1,0 +1,267 @@
+import hashlib, hmac, json,time, requests, urllib3, sys,random,datetime,os
+import pandas as pd
+from datetime import  timezone, timedelta
+
+api_key = ""
+api_secret = ""
+
+mycoin = 'SOL'
+thaibaht = 'THB'
+pair_mycoin = 'SOL_THB'
+
+
+
+def gen_sign(api_secret, payload_string=None):
+    return hmac.new(api_secret.encode('utf-8'), payload_string.encode('utf-8'), hashlib.sha256).hexdigest()
+
+def gen_query_param(url, query_param):
+    req = requests.PreparedRequest()
+    req.prepare_url(url, query_param)
+    return req.url.replace(url,"")
+
+def servertime():
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/servertime'
+    url = host + path
+    return requests.request('GET', url).text
+
+def getAmount_coin(symbol):
+    host = 'https://api.bitkub.com'
+    #path = '/api/v3/market/my-open-orders'
+    path = '/api/v3/market/balances'
+
+    ts = str(servertime())
+    param = {'sym': symbol}
+    query_param = gen_query_param(host + path, param)
+
+    payload = [ts, 'POST', path, query_param]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('POST', f'{host}{path}{query_param}', headers=headers, data={}, verify=True)
+    r = response.json()
+    return float(r['result'][symbol]['available'])
+
+
+def cancel_order(order_hash):
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/market/cancel-order'
+
+    ts = str(servertime())
+    req_body = {'hash': order_hash}
+    payload = [ts, 'POST', path, json.dumps(req_body)]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('POST', f'{host}{path}', headers=headers, data=json.dumps(req_body), verify=True)
+    return response.json()
+
+#เสนอซื้อ
+def place_bid_order(symbol, amount, rate, order_type):
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/market/place-bid'
+
+    ts = str(servertime())
+    req_body = {'sym': symbol, 'amt': amount, 'rat': rate, 'typ': order_type}
+    payload = [ts, 'POST', path, json.dumps(req_body)]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('POST', f'{host}{path}', headers=headers, data=json.dumps(req_body), verify=True)
+    return response.json()
+
+#เสนอขาย
+def place_ask_order(symbol, amount, rate, order_type):
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/market/place-ask'
+
+    ts = str(servertime())
+    req_body = {'sym': symbol, 'amt': amount, 'rat': rate, 'typ': order_type}
+    payload = [ts, 'POST', path, json.dumps(req_body)]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('POST', f'{host}{path}', headers=headers, data=json.dumps(req_body), verify=True)
+    return response.json()
+
+
+def get_order_info(symbol, order_id, side, order_hash=''):
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/market/order-info'
+
+    ts = str(servertime())
+    param = {'sym': symbol, 'id': order_id, 'sd': side, 'hash': order_hash}
+    query_param = gen_query_param(host + path, param)
+
+    payload = [ts, 'GET', path, query_param]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('GET', f'{host}{path}{query_param}', headers=headers, data={}, verify=True)
+    return response.json()
+
+def getPrice(price_mycoin):
+    host = 'https://api.bitkub.com'
+    path = '/api/v3/market/ticker'
+
+    ts = str(servertime())
+    param = {'sym': price_mycoin}
+    query_param = gen_query_param(host + path, param)
+
+    payload = [ts, 'GET', path, query_param]
+
+    sig = gen_sign(api_secret, ''.join(payload))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-BTK-TIMESTAMP': ts,
+        'X-BTK-SIGN': sig,
+        'X-BTK-APIKEY': api_key
+    }
+
+    response = requests.request('GET', f'{host}{path}{query_param}', headers=headers, data={}, verify=True)
+    r = response.json()
+    return float(r[0]['last'])
+
+def coverTimestamp(ts):
+    ts_int = int(ts)  # แปลงเป็นตัวเลขก่อน
+    dt = datetime.datetime.fromtimestamp(ts_int) # แปลงเป็นเวลาปกติ (local time)
+    return dt
+
+def saveTocsv(order_result,coin):
+    data = {
+        'เหรียญ': coin,
+        'จำนวน': order_result['result']['amt'],
+        'ไอดี': order_result['result']['id'],
+        'เวลา': coverTimestamp(order_result['result']['ts']),
+        'ประเภท': order_result['result']['typ']
+    }
+    df = pd.DataFrame([data])
+
+    csv_path = 'csv_db/tradelog.csv'
+    if not os.path.exists(csv_path):
+        df.to_csv(csv_path, index=False)  # เขียนไฟล์ใหม่ (พร้อมหัวคอลัมน์)
+    else:
+        df.to_csv(csv_path, mode='a', header=False, index=False)  # ต่อท้ายข้อมูล
+
+
+
+# Example for the second function
+#order_info_result = get_order_info(symbol='', order_id='', side='', order_hash='fwQ6dnQYKnqEHoxtaMynnLwYn6C')
+#print("Order Info Result:", order_info_result)
+
+# Example for the third function
+#bid_order_result = place_bid_order('doge_thb', 10, 1, 'limit')
+#print("Place Bid Order Result:", bid_order_result)
+
+# Example for the first function
+#symbol = 'THB'
+#result = getAmount_coin(symbol)
+#print("Result:", result)
+
+#getPrice_ = getPrice('BTC_THB')
+#print("available:", getPrice_)
+
+#print(type(my_open_orders_result))
+#print(type(getPrice_))
+
+
+def trade():
+
+    THB_value = getAmount_coin(thaibaht) # เรียกดู จำนวน เงินบาทในพอร์ต
+    coin_Amount = getAmount_coin(mycoin) # เรียกดู จำนวน เหรียญในพอร์ต
+    price_mycoin = getPrice(pair_mycoin) # เรียกดู ราคา เหรียญ
+    value_of_mycoin = coin_Amount * price_mycoin # คำนวณ มูลค่าเหรียญในพอร์ต
+    tagetValue = (value_of_mycoin + THB_value) / 2 # เอา มูลค่าหรียญ รวมกับ มูลค่าเงินบาท แล้ว หารครึ่ง จะได้ มูลค่าที่ต้องปรับ
+    diffValue = value_of_mycoin - tagetValue # มูลค่าหรียญในพอร์ต ณ ปัจจุบัน ลบกับ มูลค่าที่ต้องปรับ จะได้มูลค่าส่วนต่าง
+
+    print('เงินในพอร์ต : ' + str(THB_value) +' บาท')
+    print('จำนวน SOL : ' + str(coin_Amount))
+    print('ราคา SOL : ' + str(price_mycoin)+' บาท')
+    print('มูลค่า SOL : ' + str(value_of_mycoin)+' บาท')
+    print('มูลค่าส่วนต่าง : '+str(diffValue)+' บาท')
+
+    minDiff = abs(value_of_mycoin) * 0.02  # ขั้นต่ำที่ส่วนต่าง 2% โดยชดเชย 0.25%จาก fee
+
+    if diffValue > 0 and diffValue > minDiff:  # sell ขาย มูลค่าส่วนต่าง ถ้าไม่ติดลบ แสดงว่า ให้ ขายออกได้
+        Lot = diffValue / price_mycoin # มูลค่าส่วนต่าง หาร ราคา = จำนวนของ
+
+        # สมมุติ
+        # มีทองคำ มูลค่า 135,000บาท, เงินสดในพอร์ต 100,000บาท =  135,000+100,000= 235,000 -> (235,000/2)= มูลค่าที่เเป้าหมายที่ต้อ้งปรับ 117,500 บาท
+        # มูลค่า หาร ราคา จะได้ ปริมาณจำนวนของ เช่น มีทองคำ มูลค่า 135,000 บาท ณ ราคา 10,000 บาท/กก. แสดงว่ามี ทองคำ 13.5 กก.
+        # 135,000 - 100,000 = 35,000 -> 35,000 /ราคา = จำนวนของที่ต้องซื้อ -> 35,000 /10,000 = จำนวนของ  3.5 กก.
+
+
+        ask_order_result = place_ask_order(pair_mycoin, Lot, 0, 'market') # ยิงคำสั่ง ขาย
+        ask_order_result.to_csv(str('csv_db/tradelog.csv'), index=False)
+        saveTocsv(ask_order_result,mycoin)
+        print(ask_order_result)
+
+    if diffValue < 0 and abs(diffValue) > minDiff:  # ซื้อ # มูลค่าส่วนต่าง ติดลบ แสดงว่า ต้องซื้อเข้า เพื่อปรับมูลค่าให้สมดุลที่ 50%
+        # สมมุติ
+        # มีทองคำ มูลค่า 45,000บาท, เงินสดในพอร์ต 100,000บาท =  45,000+100,000= 145,000 -> (145,000/2)= มูลค่าที่เเป้าหมายที่ต้อ้งปรับ 72,500 บาท
+        # มูลค่า หาร ราคา จะได้ ปริมาณจำนวนของ เช่น มีทองคำ มูลค่า 45,000 บาท ณ ราคา 10,000 บาท/กก. แสดงว่ามี ทองคำ 4.5 กก.
+        # 45,000 - 72,500 = -27,500 -> แอพสรุดให้ผลเป็นบวกเสมอ(-27,500)/ราคา = จำนวนของที่ต้องซื้อ -> abs(-27,500)/10,000 = 2.75 กก.
+        # แต่เนื่องด้วย Bitkub ตอนใช้คำสั่งซื้อ มันบังคับให้ ใส่จำนวนเงิน แทนจำนวนของ ทำให้ ใช้ diffValue ได้เลย โดยไม่ต้องหาร หาจำนวนของ แบบตอน ขาย
+
+        Lot = abs(diffValue)
+
+        bid_order_result = place_bid_order(pair_mycoin, Lot, 0, 'market') #ยิงคำสั่งซื้อ
+        saveTocsv(bid_order_result,'เงินบาท')
+        print(bid_order_result)
+
+
+
+
+tigger_time_toTrade = [60, 120, 600, 360, 2400,3600,14400] # ระยะเวลาให้รอแบบสุ่ม เช่นให้รอ 60วิ 120วิ 600วิ ... 14400 วินาที
+timeBegin = 0 # เริ่มต้นที่ 0 เมื่อรันโปรแกรมครั้งแรก
+while True:
+    timeBegin = time.time() # เริ่มนับเเวลา
+    sleeptime = random.choice(tigger_time_toTrade)  # ถ่วงเวลาแบบสุ่ม ลูปนี้เลือกมาจะเอาแบบนี้ ลูปหน้าสุ่มใหม่อีกครั้ง
+    print('--------------------------------------------------------------------------------------------------------------------')
+
+    trade() # วิ่งเข้า ฟังก์ชั่น เทรด ด้านบน
+    #ask_order_result = place_ask_order(pair_mycoin, 0.01846643, 0, 'market')  # ยิงคำสั่ง ขาย
+    #print(ask_order_result)
+
+    timeEnd = time.time() # จบออกมา ใช้เวลา กี่ วิ
+    timeElapsed = timeEnd - timeBegin # ใช้เวลา รันโค้ดฟังก์ชั่นเทรด กี่ วิ
+    tz = timezone(timedelta(hours = 7)) # เวลาในไทย UTC+7
+    print('เวลา ' + str(datetime.datetime.now(tz=tz).strftime('%H:%M')) + ' กระบวนการ 1 รอบใช้เวลา ' + str(int(timeElapsed)) + ' วินาที')
+    print('รออีก '+str(int(sleeptime - timeElapsed)) +' วินาที')
+    time.sleep(sleeptime - timeElapsed)  # ถ่วงเวลา โดย เอาจำนวน วินาที ที่สุ่มมาได้ ลบกับเวลา ที่ใช้ไปในฟังก์ชั่นเทรด จะได้ เวลาที่เหลือ ถ่วงไปเรื่อยๆ
